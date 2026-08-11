@@ -370,16 +370,148 @@ afterwards.
 
 ---
 
-## 11. What to do first, concretely
+## 11. Next steps — how to execute
 
-1. Vite + React + TS strict, Vitest, the ESLint boundary rule on `src/engine/**`.
-2. `engine/types.ts` — `ContainerState`, `Box`, `Space`, `SKU`, `PackResult`, `Violation`, branded `Mm`,
-   schema version. Include `weight`, `maxStack`, `allowedOrientations` now even though nothing reads them.
-3. `engine/validate.ts` and three known-answer fixtures. Before any packer exists.
-4. Single-SKU grid fill → passes the fixtures.
-5. Extreme Points + BFD behind the strategy triple.
-6. The viewer: instanced mesh, orbit, four camera presets, the three-capacity readout.
-7. The timeline scrubber — it will immediately show you what step 5 got wrong.
+Shell first, then functionality, then business value, then UI/UX — that's the working order, applied
+in a loop rather than once. What follows turns it into milestones.
 
-Phase 1 of `CLAUDE.md` is done when you can watch a container fill and believe the positions. Steps
-1–7 are that phase, in dependency order.
+### The one thing to get right about "shell first"
+
+`CLAUDE.md` says *engine before pixels*, and that can read like "no UI for three weeks". It doesn't
+mean that. The actual rule is narrower and stricter: **the viewer may never compute a position.** It
+says nothing about the viewer existing early.
+
+So build the shell around a **hand-written `ContainerState`** — five boxes, coordinates typed by
+hand. Nothing is computed, so nothing is violated. You get a running app on day one, and you prove
+the whole pipe (types → store → viewer → metrics) before taking on any algorithm risk. When the real
+packer arrives, it replaces one function behind an interface that already works.
+
+This is the walking-skeleton pattern, and it's the right reconciliation of your instinct with the
+architecture. The failure mode it avoids is the opposite one: three weeks of beautiful engine, then
+discovering the viewer needed the data shaped differently all along.
+
+### The four gates, run at every milestone
+
+Your loop, made checkable. A milestone isn't finished until all four pass.
+
+1. **Does it run?** Clean `npm run dev`, no console errors, deployable as-is.
+2. **Is it correct?** A fixture or invariant proves it, not a screenshot.
+3. **Is it worth something?** Would a planner change a decision because of what this shows? If not,
+   you've built a feature, not value.
+4. **Is it pleasant?** Only ask once 1–3 hold. Polishing a UI whose data model is about to change is
+   the most reliable way to lose a week.
+
+Gate 3 is the one that gets skipped, and it's the one that decides whether this becomes a tool people
+open on Monday or a demo that impressed everyone once.
+
+---
+
+### M0 · The shell — a running app that draws a fake load
+
+*Goal: prove the pipe. Zero algorithms.*
+
+- Vite + React + TS (strict), Tailwind, Zustand, R3F + drei, Vitest.
+- Folder skeleton from `CLAUDE.md`, plus the ESLint `no-restricted-imports` rule on `src/engine/**`
+  in the same commit — retrofitting a boundary is much harder than starting with one.
+- `engine/types.ts`: `ContainerState`, `Box`, `Space`, `SKU`, `PackResult`, `Violation`, branded `Mm`,
+  `schemaVersion`. Include `weight`, `maxStack`, `allowedOrientations` now, even though nothing reads
+  them — adding a field to a type is free, migrating saved data is not.
+- Three-pane layout: SKU panel / 3D canvas / metrics panel, all placeholders.
+- A hard-coded `ContainerState` with ~5 boxes, rendered in a 40HC wireframe. Orbit controls.
+
+**Done when:** you can orbit a container with five boxes in it that you positioned by hand.
+**Don't yet:** write a packer, style anything, add a second container type.
+
+### M1 · Basic functionality — it packs, and the packing is real
+
+*Goal: replace the fake state with a computed one.*
+
+- `engine/validate.ts` **before any packer exists** — intersection, bounds, floating, support.
+- Three known-answer fixtures: exact fit (24 boxes, 100%), 1 mm too short, single box.
+- Single-SKU grid fill → passes the fixtures.
+- Extreme Points + Best Fit Decreasing, behind the strategy triple from §2.
+- SKU entry in the UI (plain table is fine), a Pack button, real boxes appear.
+
+**Done when:** you enter three SKUs, hit Pack, and believe the positions.
+**Gate 2 check:** hand-arithmetic a simple case and confirm the engine agrees exactly.
+**Don't yet:** a second strategy, rotations beyond the D2 default, free spaces as objects.
+
+### M2 · Business value — the three numbers and why they differ
+
+*Goal: the first milestone that's worth something to somebody else.*
+
+- Maximal free spaces tracked as real objects with identity, classification and score.
+- The three-capacity readout as the headline UI — theoretical / geometric / loaded.
+- Loss attribution by named category, with a one-line "what fixes this" per category, and the test
+  that the categories sum exactly to total free volume.
+
+**Done when:** the app explains why a container isn't full, in terms someone can act on.
+**Do this here, not later:** put it in front of a planner colleague with one real order. Before any
+polish. Their first question tells you what M4 should actually contain — and it's rarely what you'd
+have guessed.
+
+### M3 · Trust — make it auditable
+
+*Goal: survive a skeptic. Cheap, and it's what makes M2's numbers believable.*
+
+- Timeline scrubber over placement history. This is your best debugging tool and your best demo.
+- Violation overlay — render impossible boxes in red rather than hiding them.
+- Clipping plane / cross-section slider.
+
+**Done when:** someone who doubts the result can check it themselves in under a minute.
+
+### M4 · UI/UX pass — now it earns polish
+
+*Goal: make it pleasant, on a data model that has stopped moving.*
+
+- Four camera presets (top, door, side, iso) — used far more than free orbit.
+- Paste-from-Excel into the SKU grid. Not file upload; paste covers ~90% of use for ~5% of the work.
+- Colour by SKU, show/hide by SKU, click-to-inspect.
+- Unit toggle, empty states, loading states, keyboard shortcuts.
+- Printable layer-by-layer loading sheet via a print stylesheet.
+- Shareable state in the URL — no backend, and "send me the link" is how it spreads internally.
+
+**Done when:** someone uses it without you sitting next to them.
+
+### M5 · Alternatives — recommend instead of report
+
+Layer/wall building, block loading, multi-start across strategy triples, ranked layouts, side-by-side
+comparison with synced cameras. Then the carton-dimension sensitivity sweep, which is a `for` loop
+over `pack()` and is probably the highest-value feature in the entire project.
+
+### M6 · Extraction — the planner integration
+
+Package `engine/`, resolve D13–D15. Blocked on carton dimensions reaching the planner, which is an
+organisational problem with a long lead time — see the working rules below.
+
+---
+
+### Which decisions block which milestone
+
+| Milestone | Must be answered first |
+|---|---|
+| M0 | D1 (theoretical vs executable), D6 (floor-loaded vs palletised) — both change the data model |
+| M1 | D2 (rotations), D3 (support ratio), D4 (partial loads), D7 (bulge tolerance) |
+| M2 | D8 (container spec source), D9 (geometric capacity definition), D10 (loss attribution) |
+| M5 | D5 (multi-container) |
+| M6 | D13, D14, D15 |
+
+D12 (what makes this "right") has no milestone because it runs alongside all of them.
+
+### Working rules across the whole run
+
+- **Every milestone ends deployable and demoable.** Commit and push at each one. If a milestone
+  can't be shown to someone, it was scoped wrong.
+- **Start D15 and D12 in week one, in parallel with M0.** Getting carton dimensions into the
+  planner, and collecting 5–10 real historical loads to validate against, are the two things with
+  lead times measured in weeks rather than hours. Everything technical here can wait; those can't.
+- **One strategy at a time.** The urge to add a second packer before the first is trustworthy is
+  strong and should be resisted — you'll be comparing two things you can't verify.
+- **Never show a percentage without its assumptions.** Support ratio and bulge tolerance belong next
+  to every utilisation figure. A number without them is a number that will eventually be wrong in
+  front of someone who matters.
+- **When stuck between the fun thing and the useful thing,** the fun thing is metaheuristics and the
+  useful thing is loss attribution. Notice which one you're doing.
+
+Milestones M0–M3 together are Phase 1 and 2 of `CLAUDE.md`: you can watch a container fill, believe
+the positions, and get an explanation of what's left over.
