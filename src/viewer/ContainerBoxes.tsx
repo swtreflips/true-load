@@ -52,7 +52,16 @@ export function ContainerBoxes({ boxes }: { boxes: Box[] }) {
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, boxes.length]} userData={{ instanceIdToBoxId }}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial vertexColors roughness={0.6} metalness={0} />
+      {/*
+        No `vertexColors` here -- per-instance color via setColorAt()/mesh.instanceColor works
+        automatically (three.js enables USE_INSTANCING_COLOR whenever instanceColor is set,
+        independent of this flag). Setting vertexColors=true also enables the *per-vertex*
+        USE_COLOR path, which multiplies by a geometry `color` attribute our boxGeometry
+        doesn't have; the unbound attribute reads as (0,0,0) in WebGL, zeroing the instance
+        color before it's even applied. That was rendering every box pure black regardless of
+        lighting -- found by bisecting with an unlit material and pixel-sampling a screenshot.
+      */}
+      <meshStandardMaterial roughness={0.6} metalness={0} />
     </instancedMesh>
   )
 }

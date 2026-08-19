@@ -12,10 +12,6 @@ export function Scene({ containerState }: { containerState: ContainerState }) {
 
   return (
     <Canvas
-      flat // disable ACES tone mapping/sRGB pipeline: at high intensity it pushes bright
-      // surfaces toward white regardless of hue, which is what was washing out the per-SKU
-      // colors. `flat` gives direct, predictable color output -- better suited to a tool
-      // where distinguishing SKU colors matters more than photorealism.
       camera={{
         position: [center[0] + cameraDistance, center[1] + cameraDistance * 0.6, center[2] + cameraDistance],
         fov: 50,
@@ -24,9 +20,9 @@ export function Scene({ containerState }: { containerState: ContainerState }) {
       }}
     >
       <color attach="background" args={['#0f172a']} />
-      <hemisphereLight args={['#f8fafc', '#1e293b', 1]} />
-      <directionalLight position={[center[0] + cameraDistance, center[1] + cameraDistance * 1.5, center[2] + cameraDistance]} intensity={1.2} />
-      <directionalLight position={[center[0] - cameraDistance, center[1] + cameraDistance * 0.5, center[2] - cameraDistance]} intensity={0.4} />
+      <hemisphereLight args={['#f8fafc', '#1e293b', 1.2]} />
+      <directionalLight position={[center[0] + cameraDistance, center[1] + cameraDistance * 1.5, center[2] + cameraDistance]} intensity={2} />
+      <directionalLight position={[center[0] - cameraDistance, center[1] + cameraDistance * 0.5, center[2] - cameraDistance]} intensity={0.6} />
       <ContainerWireframe container={containerState.container} />
       <ContainerBoxes boxes={containerState.boxes} />
       <OrbitControls target={center} />
