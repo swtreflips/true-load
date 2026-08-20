@@ -1,31 +1,81 @@
 import { validate } from '../validate'
-import { mm, type Box, type ContainerSpec, type PackResult, type SKU } from '../types'
+import { mm, type Box, type ContainerSpec, type PackResult, type SKU, type SlabSummary } from '../types'
 
 /**
- * Which sequence SKUs get their slabs allocated in:
- *  - 'as-entered': the order the caller's SKU list is in (e.g. CSV row order, or SKU-grid order).
- *  - 'optimal-density': sorted by volume delivered per mm of container length consumed --
- *    provably the best order FOR THIS PACKER (a greedy fractional-knapsack solution: each SKU's
- *    "columns" deliver a fixed volume per mm of length regardless of quantity, so allocating
- *    length to the highest-density SKU first, then the next, maximizes total volume placed
- *    before length runs out). This is optimal for this slab-sequential packer's structure, NOT a
- *    global bin-packing optimum -- a smarter packer (Extreme Points + BFD) could beat it by
- *    sharing Z-bands across SKUs. Never present it as more than that.
+ * Carton bulge / loading tolerance (CLAUDE.md §5, PLAN.md D7): real cartons aren't their spec
+ * dimensions -- a carton packed full bulges, and no crew loads to the literal millimetre.
+ * Applied additively per dimension (`effectiveDim = spec + tolerance`) for placement math only;
+ * the nominal spec size is what's rendered and what counts as "loaded" cargo volume. Default is
+ * PLAN.md's conservative end (5-15mm typical).
  */
-export type PackOrder = 'as-entered' | 'optimal-density'
+export const DEFAULT_TOLERANCE_MM = 5
 
-/** Volume (mm^3) this SKU delivers per mm of container length its slab consumes. */
-function densityPerMm(sku: SKU, container: ContainerSpec): number {
-  const perY = Math.floor(container.w / sku.w)
-  const perZ = Math.floor(container.h / sku.h)
-  return perY * perZ * sku.w * sku.h
+/**
+ * Which sequence SKUs get their slabs allocated in. Each is a distinct, explainable heuristic a
+ * planner might reasonably try by hand -- the point isn't that any one of them is "the" answer,
+ * it's that packing and scoring several of them lets you compare outcomes instead of trusting a
+ * single clever derivation. See `rankConfigurations` for running all of them and ranking by
+ * outcome.
+ *
+ *  - 'as-entered': the order the caller's SKU list is in (e.g. CSV row order, or SKU-grid order).
+ *  - 'density-desc': sorted by volume delivered per mm of container length consumed. This is the
+ *    greedy fractional-knapsack solution and is optimal IF length could be allocated
+ *    continuously -- but this packer rounds each SKU's last partial column of boxes up to a full
+ *    column, wasting whatever length that column didn't use. With only a handful of SKUs whose
+ *    box sizes are large relative to the container, that rounding waste is not negligible: it was
+ *    tested against 'footprint-desc' on data.csv and lost (81.6% vs 82.6%). So this is a strong
+ *    heuristic, not a provable optimum for the real (integer) packer -- which is exactly why it's
+ *    ranked empirically alongside the others rather than assumed to win.
+ *  - 'footprint-desc': largest floor footprint (l x w) first -- the classic "biggest boxes first"
+ *    instinct.
+ *  - 'volume-desc': largest per-box volume first.
+ *  - 'qty-desc': the SKU with the most units to ship goes first.
+ *  - 'qty-asc': the SKU with the fewest units goes first, so small orders aren't crowded out by
+ *    the time their turn comes.
+ */
+export type PackOrder = 'as-entered' | 'density-desc' | 'footprint-desc' | 'volume-desc' | 'qty-desc' | 'qty-asc'
+
+export const ALL_PACK_ORDERS: PackOrder[] = [
+  'as-entered',
+  'density-desc',
+  'footprint-desc',
+  'volume-desc',
+  'qty-desc',
+  'qty-asc',
+]
+
+export const PACK_ORDER_LABEL: Record<PackOrder, string> = {
+  'as-entered': 'As entered',
+  'density-desc': 'Max volume/mm first',
+  'footprint-desc': 'Largest footprint first',
+  'volume-desc': 'Largest volume first',
+  'qty-desc': 'Highest quantity first',
+  'qty-asc': 'Lowest quantity first',
 }
 
-function orderSkus(skus: SKU[], container: ContainerSpec, order: PackOrder): SKU[] {
-  if (order === 'optimal-density') {
-    return [...skus].sort((a, b) => densityPerMm(b, container) - densityPerMm(a, container))
+/** Volume (mm^3) this SKU delivers per mm of container length its slab consumes, at effective (tolerance-inflated) size. */
+function densityPerMm(sku: SKU, container: ContainerSpec, toleranceMm: number): number {
+  const perY = Math.floor(container.w / (sku.w + toleranceMm))
+  const perZ = Math.floor(container.h / (sku.h + toleranceMm))
+  return perY * perZ * (sku.w + toleranceMm) * (sku.h + toleranceMm)
+}
+
+function orderSkus(skus: SKU[], container: ContainerSpec, order: PackOrder, toleranceMm: number): SKU[] {
+  switch (order) {
+    case 'density-desc':
+      return [...skus].sort((a, b) => densityPerMm(b, container, toleranceMm) - densityPerMm(a, container, toleranceMm))
+    case 'footprint-desc':
+      return [...skus].sort((a, b) => b.l * b.w - a.l * a.w)
+    case 'volume-desc':
+      return [...skus].sort((a, b) => b.l * b.w * b.h - a.l * a.w * a.h)
+    case 'qty-desc':
+      return [...skus].sort((a, b) => b.qty - a.qty)
+    case 'qty-asc':
+      return [...skus].sort((a, b) => a.qty - b.qty)
+    case 'as-entered':
+    default:
+      return [...skus]
   }
-  return [...skus]
 }
 
 /**
@@ -51,38 +101,74 @@ function orderSkus(skus: SKU[], container: ContainerSpec, order: PackOrder): SKU
  * it's the fastest path to a real, testable, support-correct pack using actual data.
  *
  * Not this pass: rotation search (upright-only, orientation index 0, per PLAN.md D2 default).
+ *
+ * Each SKU's own `priority` flag (default true) independently decides how its slab handles a
+ * trailing partial column -- the rectangular `perY x perZ` cross-section wall a slab is built
+ * from. Priority SKUs round UP: the partial last column is placed anyway, reserving that
+ * column's full length even though it isn't full (this is the `columnRoundingMm3` waste named in
+ * lossAttribution.ts) -- because a priority SKU's whole quantity must ship. Non-priority SKUs
+ * round DOWN instead: only complete columns are placed, the remainder is held back (added to
+ * `unplaced`), and the length that would have been reserved for the partial column is freed for
+ * whatever SKU comes next in the sequence. This is a per-SKU input the user sets deliberately, not
+ * something the base ordering algorithm (`order`) decides on its own.
  */
-export function pack(skus: SKU[], container: ContainerSpec, order: PackOrder = 'as-entered'): PackResult {
-  const sorted = orderSkus(skus, container, order)
+export function pack(
+  skus: SKU[],
+  container: ContainerSpec,
+  order: PackOrder = 'as-entered',
+  toleranceMm: number = DEFAULT_TOLERANCE_MM,
+): PackResult {
+  const sorted = orderSkus(skus, container, order, toleranceMm)
 
   const boxes: Box[] = []
   const placementHistory: string[] = []
   const unplaced: { skuId: string; qty: number }[] = []
+  const slabs: SlabSummary[] = []
 
   let cursorX = 0
 
   for (const sku of sorted) {
     const { l, w, h, qty } = sku
+    // Effective (tolerance-inflated) dims drive placement math and spacing; boxes are stored
+    // and rendered at their nominal size, so tolerance shows up as real visible gaps between
+    // adjacent boxes rather than a hidden fudge factor.
+    const effL = l + toleranceMm
+    const effW = w + toleranceMm
+    const effH = h + toleranceMm
     const remainingL = container.l - cursorX
 
-    const perX = Math.floor(remainingL / l)
-    const perY = Math.floor(container.w / w)
-    const perZ = Math.floor(container.h / h)
-    const capacity = perX * perY * perZ
+    const perX = Math.floor(remainingL / effL)
+    const perY = Math.floor(container.w / effW)
+    const perZ = Math.floor(container.h / effH)
+    const columnCapacity = perY * perZ
+    const capacity = perX * columnCapacity
     const toPlace = Math.min(qty, capacity)
+
+    // Round on `qty` (not `toPlace`), capped by `perX`: when length is the binding constraint,
+    // `toPlace` is already an exact multiple of `columnCapacity` (capacity = perX*perY*perZ), so
+    // the cap makes this a no-op there -- rounding only ever changes behaviour when the SKU's own
+    // supply, not the container's remaining length, is what leaves a column incomplete.
+    const roundDown = !sku.priority
+    const columnsForQty = columnCapacity > 0 ? Math.floor(qty / columnCapacity) : 0
+    const columnsUsed = roundDown
+      ? Math.min(columnsForQty, perX)
+      : columnCapacity > 0
+        ? Math.ceil(toPlace / columnCapacity)
+        : 0
+    const actualToPlace = roundDown ? columnsUsed * columnCapacity : toPlace
 
     let placedCount = 0
     columns: for (let xi = 0; xi < perX; xi++) {
       for (let yi = 0; yi < perY; yi++) {
         for (let zi = 0; zi < perZ; zi++) {
-          if (placedCount >= toPlace) break columns
+          if (placedCount >= actualToPlace) break columns
 
           const box: Box = {
             id: `${sku.id}-${placedCount}`,
             skuId: sku.id,
-            x: mm(cursorX + xi * l),
-            y: mm(yi * w),
-            z: mm(zi * h),
+            x: mm(cursorX + xi * effL),
+            y: mm(yi * effW),
+            z: mm(zi * effH),
             l,
             w,
             h,
@@ -95,12 +181,24 @@ export function pack(skus: SKU[], container: ContainerSpec, order: PackOrder = '
       }
     }
 
-    if (qty > toPlace) {
-      unplaced.push({ skuId: sku.id, qty: qty - toPlace })
+    if (qty > actualToPlace) {
+      unplaced.push({ skuId: sku.id, qty: qty - actualToPlace })
     }
 
-    const columnsUsed = perY * perZ > 0 ? Math.ceil(toPlace / (perY * perZ)) : 0
-    cursorX += columnsUsed * l
+    slabs.push({
+      skuId: sku.id,
+      l,
+      w,
+      h,
+      effL: mm(effL),
+      effW: mm(effW),
+      effH: mm(effH),
+      perY,
+      perZ,
+      columnsUsed,
+      toPlace: actualToPlace,
+    })
+    cursorX += columnsUsed * effL
   }
 
   const state = {
@@ -109,7 +207,8 @@ export function pack(skus: SKU[], container: ContainerSpec, order: PackOrder = '
     boxes,
     unplaced,
     placementHistory,
+    slabs,
   }
 
-  return { state, violations: validate(state) }
+  return { state, violations: validate(state, toleranceMm) }
 }

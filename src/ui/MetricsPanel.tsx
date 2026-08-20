@@ -1,102 +1,132 @@
-import type { PackOrder } from '../engine/packers/shelfPacker'
-import type { OrderResult } from '../store/useContainerStore'
+import { PACK_ORDER_LABEL, type PackOrder } from '../engine/packers/shelfPacker'
+import type { RankedConfiguration } from '../engine/packers/rankConfigurations'
 import type { SKU } from '../engine/types'
+import { LossBreakdownBar } from './LossBreakdownBar'
 
-const ORDER_LABEL: Record<PackOrder, string> = {
-  'as-entered': 'As entered',
-  'optimal-density': 'Optimal order',
-}
+const RANK_BADGE = ['#1', '#2', '#3']
 
-function skuName(skus: SKU[], skuId: string): string {
-  return skus.find((s) => s.id === skuId)?.name ?? skuId
+function findSku(skus: SKU[], skuId: string): SKU | undefined {
+  return skus.find((s) => s.id === skuId)
 }
 
 export function MetricsPanel({
   skus,
-  activeOrder,
-  active,
-  comparisonOrder,
-  comparison,
-  onOrderChange,
+  toleranceMm,
+  onToleranceChange,
+  top3,
+  selectedOrder,
+  onSelectOrder,
 }: {
   skus: SKU[]
-  activeOrder: PackOrder
-  active: OrderResult
-  comparisonOrder: PackOrder
-  comparison: OrderResult
-  onOrderChange: (order: PackOrder) => void
+  toleranceMm: number
+  onToleranceChange: (toleranceMm: number) => void
+  top3: RankedConfiguration[]
+  selectedOrder: PackOrder
+  onSelectOrder: (order: PackOrder) => void
 }) {
-  const delta = (comparison.utilisation.utilisationRatio - active.utilisation.utilisationRatio) * 100
+  const selected = top3.find((c) => c.order === selectedOrder) ?? top3[0]
 
   return (
     <div className="text-slate-200 text-sm space-y-4">
       <div>
-        <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">Sequence</div>
-        <div className="flex rounded overflow-hidden border border-slate-700">
-          {(['as-entered', 'optimal-density'] as const).map((order) => (
-            <button
-              key={order}
-              onClick={() => onOrderChange(order)}
-              className={`flex-1 px-2 py-1 text-xs ${
-                order === activeOrder ? 'bg-slate-100 text-slate-900 font-medium' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              {ORDER_LABEL[order]}
-            </button>
-          ))}
+        <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">Carton tolerance</div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            value={toleranceMm}
+            onChange={(e) => onToleranceChange(Number(e.target.value))}
+            className="w-16 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-right text-slate-100 focus:outline-none focus:border-slate-400"
+          />
+          <span className="text-slate-400">mm added per dimension</span>
         </div>
         <div className="text-xs text-slate-500 mt-1">
-          "Optimal order" allocates length to the SKU that delivers the most volume per mm first —
-          optimal for this packer's slab strategy, not a global packing optimum.
+          Real cartons bulge and crews don't load to the millimetre — this space is reserved
+          around every box for placement, not just subtracted from the total afterward.
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">
+          Top {top3.length} configurations
+        </div>
+        <div className="space-y-1">
+          {top3.map((config, i) => {
+            const isSelected = config.order === selectedOrder
+            return (
+              <button
+                key={config.order}
+                onClick={() => onSelectOrder(config.order)}
+                className={`w-full flex items-center justify-between px-2 py-1.5 rounded border text-left ${
+                  isSelected
+                    ? 'bg-slate-100 text-slate-900 border-slate-100 font-medium'
+                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">{RANK_BADGE[i]}</span>
+                  <span>{PACK_ORDER_LABEL[config.order]}</span>
+                </span>
+                <span className="tabular-nums">{(config.utilisation.utilisationRatio * 100).toFixed(1)}%</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="text-xs text-slate-500 mt-1">
+          Every strategy is packed and scored — none is assumed best. Ranked by utilisation across
+          all six SKU-sequencing strategies this packer knows. Which SKUs must ship in full is set
+          per-SKU in the table on the left ("Priority"), not part of this ranking.
         </div>
       </div>
 
       <div>
         <div className="text-xs uppercase tracking-wide text-slate-400">Loaded</div>
-        <div className="text-2xl font-semibold">{active.utilisation.loadedCbm.toFixed(2)} CBM</div>
+        <div className="text-2xl font-semibold">{selected.utilisation.loadedCbm.toFixed(2)} CBM</div>
       </div>
       <div>
         <div className="text-xs uppercase tracking-wide text-slate-400">Theoretical capacity</div>
-        <div className="text-2xl font-semibold">{active.utilisation.theoreticalCbm.toFixed(2)} CBM</div>
+        <div className="text-2xl font-semibold">{selected.utilisation.theoreticalCbm.toFixed(2)} CBM</div>
       </div>
       <div>
         <div className="text-xs uppercase tracking-wide text-slate-400">Utilisation</div>
-        <div className="text-2xl font-semibold">{(active.utilisation.utilisationRatio * 100).toFixed(1)}%</div>
+        <div className="text-2xl font-semibold">{(selected.utilisation.utilisationRatio * 100).toFixed(1)}%</div>
         <div className="text-xs text-slate-500">Volume-only — not the full theoretical/geometric/loaded split yet.</div>
-        {Math.abs(delta) > 0.05 && (
-          <div className={`text-xs mt-1 ${delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-            {ORDER_LABEL[comparisonOrder]} would be {delta > 0 ? '+' : ''}
-            {delta.toFixed(1)}pt {delta > 0 ? 'better' : 'worse'} ({(comparison.utilisation.utilisationRatio * 100).toFixed(1)}%)
-          </div>
-        )}
       </div>
+
+      <LossBreakdownBar loss={selected.loss} />
 
       <div className="pt-2 border-t border-slate-700">
         <div className="text-xs uppercase tracking-wide text-slate-400">Boxes</div>
         <div>
-          {active.utilisation.boxesPlaced} placed
-          {active.utilisation.boxesUnplaced > 0 && (
-            <span className="text-amber-400"> · {active.utilisation.boxesUnplaced} unplaced</span>
+          {selected.utilisation.boxesPlaced} placed
+          {selected.utilisation.boxesUnplaced > 0 && (
+            <span className="text-amber-400"> · {selected.utilisation.boxesUnplaced} unplaced</span>
           )}
         </div>
       </div>
 
-      {active.unplaced.length > 0 && (
+      {selected.containerState.unplaced.length > 0 && (
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">What's left over</div>
           <ul className="space-y-0.5">
-            {active.unplaced.map((entry) => (
-              <li key={entry.skuId} className="flex justify-between text-amber-300">
-                <span>{skuName(skus, entry.skuId)}</span>
-                <span>{entry.qty}</span>
-              </li>
-            ))}
+            {selected.containerState.unplaced.map((entry) => {
+              const sku = findSku(skus, entry.skuId)
+              return (
+                <li key={entry.skuId} className="flex justify-between text-amber-300">
+                  <span>
+                    {sku?.name ?? entry.skuId}
+                    {sku && !sku.priority && <span className="text-slate-500"> (deprioritized)</span>}
+                  </span>
+                  <span>{entry.qty}</span>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
 
-      <div className={active.violations.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
-        {active.violations.length > 0 ? `${active.violations.length} violation(s)` : 'No violations'}
+      <div className={selected.violations.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
+        {selected.violations.length > 0 ? `${selected.violations.length} violation(s)` : 'No violations'}
       </div>
     </div>
   )

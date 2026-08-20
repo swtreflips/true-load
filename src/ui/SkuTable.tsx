@@ -4,12 +4,23 @@ function volumeM3(sku: SKU): number {
   return (sku.l * sku.w * sku.h) / 1_000_000_000
 }
 
-export function SkuTable({ skus, onQtyChange }: { skus: SKU[]; onQtyChange: (skuId: string, qty: number) => void }) {
+export function SkuTable({
+  skus,
+  onQtyChange,
+  onPriorityChange,
+}: {
+  skus: SKU[]
+  onQtyChange: (skuId: string, qty: number) => void
+  onPriorityChange: (skuId: string, priority: boolean) => void
+}) {
   return (
     <table className="w-full text-sm text-slate-200">
       <thead>
         <tr className="text-left text-slate-400 border-b border-slate-700">
           <th className="py-1 pr-2">Item</th>
+          <th className="py-1 pr-2 text-center" title="Must ship in full. Deselect to let the packer hold back units that don't complete a full column.">
+            Priority
+          </th>
           <th className="py-1 pr-2 text-right">Qty</th>
           <th className="py-1 pr-2 text-right">L×W×H (mm)</th>
           <th className="py-1 text-right">Vol (m³)</th>
@@ -19,6 +30,14 @@ export function SkuTable({ skus, onQtyChange }: { skus: SKU[]; onQtyChange: (sku
         {skus.map((sku) => (
           <tr key={sku.id} className="border-b border-slate-800">
             <td className="py-1 pr-2">{sku.name}</td>
+            <td className="py-1 pr-2 text-center">
+              <input
+                type="checkbox"
+                checked={sku.priority}
+                onChange={(e) => onPriorityChange(sku.id, e.target.checked)}
+                title={sku.priority ? 'Must ship in full' : 'May hold back units to complete a full column'}
+              />
+            </td>
             <td className="py-1 pr-2 text-right">
               <input
                 type="number"

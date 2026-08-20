@@ -37,6 +37,7 @@ export function parseSkuCsv(csvText: string): SKU[] {
         h: cm(Number(cells[heightIdx])),
         qty: Number(cells[qtyIdx]),
         allowedOrientations: [0],
+        priority: true,
       } satisfies SKU
     })
 }

@@ -11,7 +11,7 @@ describe('data.csv against a 40HC', () => {
     expect(skus.reduce((sum, s) => sum + s.qty, 0)).toBe(1550)
   })
 
-  it.each(['as-entered', 'optimal-density'] as const)(
+  it.each(['as-entered', 'density-desc'] as const)(
     'packs without violations under %s order, and honestly reports what does not fit',
     (order) => {
       // Combined SKU volume is ~93.2 m3 (275x0.058194 + 400x0.058194 + 300x0.09177 +
@@ -36,16 +36,4 @@ describe('data.csv against a 40HC', () => {
       expect(utilisation.utilisationRatio).toBeLessThanOrEqual(1)
     },
   )
-
-  it('optimal-density order does at least as well as as-entered order', () => {
-    // This is the actual claim behind the "optimal order" UI toggle: for this packer's
-    // slab structure, sequencing SKUs by volume-per-mm-of-length is a greedy fractional-
-    // knapsack solution, so it should never do worse than whatever order the SKUs happened
-    // to be entered in.
-    const skus = loadInitialSkus()
-    const asEntered = computeUtilisation(pack(skus, CONTAINER_40HC, 'as-entered').state)
-    const optimal = computeUtilisation(pack(skus, CONTAINER_40HC, 'optimal-density').state)
-
-    expect(optimal.utilisationRatio).toBeGreaterThanOrEqual(asEntered.utilisationRatio)
-  })
 })

@@ -22,6 +22,7 @@ export const GRID_SKU: SKU = {
   h: mm(500),
   qty: 8,
   allowedOrientations: [0],
+  priority: true,
 }
 
 /**
@@ -52,4 +53,33 @@ export const SINGLE_SKU: SKU = {
   h: mm(200),
   qty: 1,
   allowedOrientations: [0],
+  priority: true,
+}
+
+/**
+ * A container whose cross-section fits exactly 2x2=4 boxes per column (one "complete column" =
+ * one full perY x perZ rectangular block), with plenty of length for many columns. Paired with
+ * PARTIAL_COLUMN_SKU's qty=10, this hand-verifies the priority flag's rounding behaviour: 10
+ * boxes is 2 full columns (8) plus a remainder of 2 that doesn't complete a third column.
+ * Defaults to priority: true (round up, place all 10) -- tests spread `{ ...PARTIAL_COLUMN_SKU,
+ * priority: false }` to exercise the round-down/hold-back behaviour.
+ */
+export const PARTIAL_COLUMN_CONTAINER: ContainerSpec = {
+  id: 'partial-column-test',
+  name: 'Partial column test container',
+  l: mm(1000),
+  w: mm(200),
+  h: mm(200),
+  source: 'synthetic fixture',
+}
+
+export const PARTIAL_COLUMN_SKU: SKU = {
+  id: 'partial-column-box',
+  name: 'Partial column box',
+  l: mm(100),
+  w: mm(100),
+  h: mm(100),
+  qty: 10,
+  allowedOrientations: [0],
+  priority: true,
 }

@@ -1,69 +1,70 @@
 import { create } from 'zustand'
-import { pack, type PackOrder } from '../engine/packers/shelfPacker'
+import { rankConfigurations, type RankedConfiguration } from '../engine/packers/rankConfigurations'
 import { CONTAINER_40HC } from '../engine/containers'
-import { computeUtilisation, type Utilisation } from '../engine/metrics/utilisation'
 import { loadInitialSkus } from '../fixtures/loadInitialSkus'
-import type { ContainerState, SKU, UnplacedEntry, Violation } from '../engine/types'
+import { DEFAULT_TOLERANCE_MM, type PackOrder } from '../engine/packers/shelfPacker'
+import type { ContainerSpec, SKU } from '../engine/types'
 
-export interface OrderResult {
-  containerState: ContainerState
-  violations: Violation[]
-  utilisation: Utilisation
-  unplaced: UnplacedEntry[]
-}
+export const TOP_N = 3
 
 interface ContainerStoreState {
   skus: SKU[]
-  activeOrder: PackOrder
-  active: OrderResult
-  /** The other order's result, computed alongside the active one so the trade-off is always visible. */
-  comparisonOrder: PackOrder
-  comparison: OrderResult
+  /** Which container type the packer is filling -- 20GP, 40GP, or 40HC (see engine/containers.ts). */
+  container: ContainerSpec
+  /** Carton bulge / loading tolerance in mm, added to each dimension for placement (CLAUDE.md §5). */
+  toleranceMm: number
+  /** All known sequencing strategies, packed and sorted best-utilisation-first. */
+  rankedConfigs: RankedConfiguration[]
+  selectedOrder: PackOrder
   setSkuQty: (skuId: string, qty: number) => void
-  setActiveOrder: (order: PackOrder) => void
+  setSkuPriority: (skuId: string, priority: boolean) => void
+  setToleranceMm: (toleranceMm: number) => void
+  setContainer: (container: ContainerSpec) => void
+  setSelectedOrder: (order: PackOrder) => void
 }
 
-function otherOrder(order: PackOrder): PackOrder {
-  return order === 'as-entered' ? 'optimal-density' : 'as-entered'
-}
-
-function packOrder(skus: SKU[], order: PackOrder): OrderResult {
-  const { state, violations } = pack(skus, CONTAINER_40HC, order)
-  return {
-    containerState: state,
-    violations,
-    utilisation: computeUtilisation(state),
-    unplaced: state.unplaced,
-  }
-}
-
-function computeBoth(skus: SKU[], activeOrder: PackOrder) {
-  const comparisonOrder = otherOrder(activeOrder)
-  return {
-    active: packOrder(skus, activeOrder),
-    comparisonOrder,
-    comparison: packOrder(skus, comparisonOrder),
-  }
+function recompute(skus: SKU[], container: ContainerSpec, toleranceMm: number, previouslySelected: PackOrder) {
+  const rankedConfigs = rankConfigurations(skus, container, toleranceMm)
+  const topOrders = rankedConfigs.slice(0, TOP_N).map((c) => c.order)
+  // Keep the user's selection if it's still in the top N after the change; otherwise the
+  // configuration they were looking at dropped out of contention, so snap back to the best.
+  const selectedOrder = topOrders.includes(previouslySelected) ? previouslySelected : rankedConfigs[0].order
+  return { rankedConfigs, selectedOrder }
 }
 
 export const useContainerStore = create<ContainerStoreState>((set, get) => {
   const skus = loadInitialSkus()
-  const activeOrder: PackOrder = 'as-entered'
+  const container = CONTAINER_40HC
+  const toleranceMm = DEFAULT_TOLERANCE_MM
+  const initial = recompute(skus, container, toleranceMm, 'as-entered')
 
   return {
     skus,
-    activeOrder,
-    ...computeBoth(skus, activeOrder),
+    container,
+    toleranceMm,
+    ...initial,
 
     setSkuQty: (skuId, qty) => {
       const nextSkus = get().skus.map((sku) =>
         sku.id === skuId ? { ...sku, qty: Math.max(0, Math.round(qty)) } : sku,
       )
-      set({ skus: nextSkus, ...computeBoth(nextSkus, get().activeOrder) })
+      set({ skus: nextSkus, ...recompute(nextSkus, get().container, get().toleranceMm, get().selectedOrder) })
     },
 
-    setActiveOrder: (order) => {
-      set({ activeOrder: order, ...computeBoth(get().skus, order) })
+    setSkuPriority: (skuId, priority) => {
+      const nextSkus = get().skus.map((sku) => (sku.id === skuId ? { ...sku, priority } : sku))
+      set({ skus: nextSkus, ...recompute(nextSkus, get().container, get().toleranceMm, get().selectedOrder) })
     },
+
+    setToleranceMm: (toleranceMm) => {
+      const clamped = Math.max(0, Math.round(toleranceMm))
+      set({ toleranceMm: clamped, ...recompute(get().skus, get().container, clamped, get().selectedOrder) })
+    },
+
+    setContainer: (container) => {
+      set({ container, ...recompute(get().skus, container, get().toleranceMm, get().selectedOrder) })
+    },
+
+    setSelectedOrder: (order) => set({ selectedOrder: order }),
   }
 })

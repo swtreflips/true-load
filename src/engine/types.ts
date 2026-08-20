@@ -55,6 +55,15 @@ export interface SKU {
   /** Undefined means unknown, not zero — data.csv has no weight column. */
   weight?: number
   allowedOrientations: Orientation[]
+  /**
+   * Default true: this SKU's full quantity must be placed wherever geometrically possible, so
+   * its slab rounds UP and fills a trailing partial column rather than leaving units out.
+   * Marking a SKU non-priority (false) is what allows the packer to round DOWN instead --
+   * holding back the units that don't complete a full column, to free that length for whatever
+   * comes next. This is a per-SKU input the user sets deliberately, not something the base
+   * ordering algorithm (PackOrder) decides on its own.
+   */
+  priority: boolean
 }
 
 /** Position is the box's min corner, never its centre. */
@@ -85,6 +94,32 @@ export interface UnplacedEntry {
   qty: number
 }
 
+/**
+ * Geometric facts about one SKU's slab, captured during packing so `lossAttribution` can
+ * exactly partition the container's volume without re-deriving packer-internal math. Effective
+ * dims are the tolerance-inflated ones actually used for placement (see `pack`'s `toleranceMm`
+ * param); nominal dims (on the SKU/Box) are the real cargo size.
+ */
+export interface SlabSummary {
+  skuId: string
+  /** Nominal (spec) dims -- the real cargo size, before tolerance. */
+  l: Mm
+  w: Mm
+  h: Mm
+  /** Effective (tolerance-inflated) dims actually used for placement. */
+  effL: Mm
+  effW: Mm
+  effH: Mm
+  /** Boxes per row across the container width, at effective width. */
+  perY: number
+  /** Boxes per layer up the container height, at effective height. */
+  perZ: number
+  /** Columns of length `effL` this slab actually consumes. */
+  columnsUsed: number
+  /** Boxes actually placed in this slab. */
+  toPlace: number
+}
+
 export interface ContainerState {
   schemaVersion: 1
   container: ContainerSpec
@@ -92,6 +127,8 @@ export interface ContainerState {
   unplaced: UnplacedEntry[]
   /** Box ids in the order they were placed. Powers the timeline scrubber (later milestone). */
   placementHistory: string[]
+  /** Per-SKU slab geometry, in placement order. See `SlabSummary`. */
+  slabs: SlabSummary[]
 }
 
 export type ViolationType = 'intersection' | 'out-of-bounds' | 'floating'

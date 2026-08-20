@@ -6,8 +6,15 @@ import type { ContainerState, Violation } from './types'
  * nothing floating. Returns violations rather than throwing (CLAUDE.md rule 7) so callers —
  * tests now, the viewer's violation overlay later — can inspect and render them instead of
  * crashing on a bad pack.
+ *
+ * `supportGapMm` is the largest vertical gap between a box's bottom and whatever's beneath it
+ * that still counts as "resting on it" rather than floating. Default 0 means exact touching.
+ * Pass the packer's carton tolerance here when validating a real pack: tolerance deliberately
+ * reserves that much clearance around every box (CLAUDE.md §5), so a box sitting `toleranceMm`
+ * above the one below it is accounted-for clearance, not a genuine physical bug -- a gap bigger
+ * than that would still be flagged.
  */
-export function validate(state: ContainerState): Violation[] {
+export function validate(state: ContainerState, supportGapMm = 0): Violation[] {
   const violations: Violation[] = []
   const { boxes, container } = state
 
@@ -40,7 +47,8 @@ export function validate(state: ContainerState): Violation[] {
     let supportedArea = 0
     for (const other of boxes) {
       if (other.id === box.id) continue
-      if (other.z + other.h !== box.z) continue // top of `other` doesn't touch bottom of `box`
+      const gapToOtherTop = box.z - (other.z + other.h)
+      if (gapToOtherTop < 0 || gapToOtherTop > supportGapMm) continue // `other` isn't (closely enough) beneath `box`
       if (!footprintOverlaps(box, other)) continue
 
       const overlapL = Math.min(box.x + box.l, other.x + other.l) - Math.max(box.x, other.x)
