@@ -2,6 +2,33 @@ import { validate } from '../validate'
 import { mm, type Box, type ContainerSpec, type PackResult, type SKU } from '../types'
 
 /**
+ * Which sequence SKUs get their slabs allocated in:
+ *  - 'as-entered': the order the caller's SKU list is in (e.g. CSV row order, or SKU-grid order).
+ *  - 'optimal-density': sorted by volume delivered per mm of container length consumed --
+ *    provably the best order FOR THIS PACKER (a greedy fractional-knapsack solution: each SKU's
+ *    "columns" deliver a fixed volume per mm of length regardless of quantity, so allocating
+ *    length to the highest-density SKU first, then the next, maximizes total volume placed
+ *    before length runs out). This is optimal for this slab-sequential packer's structure, NOT a
+ *    global bin-packing optimum -- a smarter packer (Extreme Points + BFD) could beat it by
+ *    sharing Z-bands across SKUs. Never present it as more than that.
+ */
+export type PackOrder = 'as-entered' | 'optimal-density'
+
+/** Volume (mm^3) this SKU delivers per mm of container length its slab consumes. */
+function densityPerMm(sku: SKU, container: ContainerSpec): number {
+  const perY = Math.floor(container.w / sku.w)
+  const perZ = Math.floor(container.h / sku.h)
+  return perY * perZ * sku.w * sku.h
+}
+
+function orderSkus(skus: SKU[], container: ContainerSpec, order: PackOrder): SKU[] {
+  if (order === 'optimal-density') {
+    return [...skus].sort((a, b) => densityPerMm(b, container) - densityPerMm(a, container))
+  }
+  return [...skus]
+}
+
+/**
  * Sequential per-SKU grid-fill slabs along the container length (X).
  *
  * Each SKU gets an exclusive slice of the container's length and grid-fills it top-to-bottom,
@@ -25,8 +52,8 @@ import { mm, type Box, type ContainerSpec, type PackResult, type SKU } from '../
  *
  * Not this pass: rotation search (upright-only, orientation index 0, per PLAN.md D2 default).
  */
-export function pack(skus: SKU[], container: ContainerSpec): PackResult {
-  const sorted = [...skus].sort((a, b) => b.l * b.w - a.l * a.w)
+export function pack(skus: SKU[], container: ContainerSpec, order: PackOrder = 'as-entered'): PackResult {
+  const sorted = orderSkus(skus, container, order)
 
   const boxes: Box[] = []
   const placementHistory: string[] = []

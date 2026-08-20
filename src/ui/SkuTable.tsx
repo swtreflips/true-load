@@ -4,7 +4,7 @@ function volumeM3(sku: SKU): number {
   return (sku.l * sku.w * sku.h) / 1_000_000_000
 }
 
-export function SkuTable({ skus }: { skus: SKU[] }) {
+export function SkuTable({ skus, onQtyChange }: { skus: SKU[]; onQtyChange: (skuId: string, qty: number) => void }) {
   return (
     <table className="w-full text-sm text-slate-200">
       <thead>
@@ -19,7 +19,15 @@ export function SkuTable({ skus }: { skus: SKU[] }) {
         {skus.map((sku) => (
           <tr key={sku.id} className="border-b border-slate-800">
             <td className="py-1 pr-2">{sku.name}</td>
-            <td className="py-1 pr-2 text-right">{sku.qty}</td>
+            <td className="py-1 pr-2 text-right">
+              <input
+                type="number"
+                min={0}
+                value={sku.qty}
+                onChange={(e) => onQtyChange(sku.id, Number(e.target.value))}
+                className="w-16 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-right text-slate-100 focus:outline-none focus:border-slate-400"
+              />
+            </td>
             <td className="py-1 pr-2 text-right">
               {sku.l}×{sku.w}×{sku.h}
             </td>
