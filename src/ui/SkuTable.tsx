@@ -4,12 +4,19 @@ function volumeM3(sku: SKU): number {
   return (sku.l * sku.w * sku.h) / 1_000_000_000
 }
 
+/**
+ * The allocation tray: what's actually been committed to the container (sku.qty here is the
+ * allocated amount, not the pool total -- see SkuPoolTray for that). Editing "Allocated" moves
+ * units back and forth against the pool automatically, clamped to what's available there.
+ */
 export function SkuTable({
   skus,
+  maxQty,
   onQtyChange,
   onPriorityChange,
 }: {
   skus: SKU[]
+  maxQty: Record<string, number>
   onQtyChange: (skuId: string, qty: number) => void
   onPriorityChange: (skuId: string, priority: boolean) => void
 }) {
@@ -21,7 +28,7 @@ export function SkuTable({
           <th className="py-1 pr-2 text-center" title="Must ship in full. Deselect to let the packer hold back units that don't complete a full column.">
             Priority
           </th>
-          <th className="py-1 pr-2 text-right">Qty</th>
+          <th className="py-1 pr-2 text-right">Allocated</th>
           <th className="py-1 pr-2 text-right">L×W×H (mm)</th>
           <th className="py-1 text-right">Vol (m³)</th>
         </tr>
@@ -42,6 +49,7 @@ export function SkuTable({
               <input
                 type="number"
                 min={0}
+                max={maxQty[sku.id] ?? 0}
                 value={sku.qty}
                 onChange={(e) => onQtyChange(sku.id, Number(e.target.value))}
                 className="w-16 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-right text-slate-100 focus:outline-none focus:border-slate-400"
