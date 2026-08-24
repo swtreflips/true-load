@@ -13,7 +13,8 @@ export function ContainerWireframe({ container }: { container: ContainerSpec }) 
 
   return (
     <lineSegments position={[sizeX / 2, sizeY / 2, sizeZ / 2]} geometry={edges}>
-      <lineBasicMaterial color="#94a3b8" />
+      {/* --color-steel, dimmed slightly for the wireframe against the new floor grid */}
+      <lineBasicMaterial color="#a3aebb" />
     </lineSegments>
   )
 }

@@ -1,8 +1,32 @@
 @import "tailwindcss";
 
+/*
+ * Freight-yard token system (see the UI/UX redesign plan) -- named so every component
+ * references `bg-hull`, `text-manifest`, etc. instead of raw hex or generic Tailwind slate.
+ */
+@theme {
+  --color-hull: #12181f;
+  --color-deck: #1b232c;
+  --color-rivet: #2b3641;
+  --color-manifest: #edeae3;
+  --color-steel: #8b93a0;
+  --color-cargo-yellow: #d99a3b;
+  --color-cargo-green: #6b9b5e;
+  --color-rust: #a94a3d;
+
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+body {
+  background-color: var(--color-hull);
+  color: var(--color-manifest);
+  font-family: var(--font-sans);
 }

@@ -1,4 +1,5 @@
 import { validate } from '../validate'
+import { chooseFootprint } from './footprintOrientation'
 import { mm, type Box, type ContainerSpec, type PackResult, type SKU, type SlabSummary } from '../types'
 
 /**
@@ -100,7 +101,15 @@ function orderSkus(skus: SKU[], container: ContainerSpec, order: PackOrder, tole
  * for. This is still not Extreme Points + Best Fit Decreasing (the real Phase 1/M1 packer) --
  * it's the fastest path to a real, testable, support-correct pack using actual data.
  *
- * Not this pass: rotation search (upright-only, orientation index 0, per PLAN.md D2 default).
+ * Footprint rotation (length/width swap, height never touched -- see `SKU.allowRotation` and
+ * `footprintOrientation.ts`) is decided once per SKU, per slab, before any of the math below
+ * runs: `chooseFootprint` simulates both orientations against the real remaining length and
+ * hands back whichever one places more units, plus the capacity numbers this loop reuses
+ * directly. That choice is a separate, self-contained module on purpose -- it doesn't touch
+ * `orderSkus`/`PackOrder` (a SKU's sequence position is decided first, independently) and it
+ * isn't a second thing this function has to reason about, just an input it's handed. Full
+ * 6-orientation search (tipping a box onto its side) is still out of scope, per PLAN.md D2's
+ * upright-only default.
  *
  * Each SKU's own `priority` flag (default true) independently decides how its slab handles a
  * trailing partial column -- the rectangular `perY x perZ` cross-section wall a slab is built
@@ -128,34 +137,18 @@ export function pack(
   let cursorX = 0
 
   for (const sku of sorted) {
-    const { l, w, h, qty } = sku
+    const { h, qty } = sku
+    const remainingL = container.l - cursorX
+
+    const { l, w, rotated, capacity } = chooseFootprint(sku, container, toleranceMm, remainingL)
+    const { perX, perY, perZ, columnsUsed, toPlace: actualToPlace } = capacity
+
     // Effective (tolerance-inflated) dims drive placement math and spacing; boxes are stored
-    // and rendered at their nominal size, so tolerance shows up as real visible gaps between
-    // adjacent boxes rather than a hidden fudge factor.
+    // and rendered at their nominal (chosen-footprint) size, so tolerance shows up as real
+    // visible gaps between adjacent boxes rather than a hidden fudge factor.
     const effL = l + toleranceMm
     const effW = w + toleranceMm
     const effH = h + toleranceMm
-    const remainingL = container.l - cursorX
-
-    const perX = Math.floor(remainingL / effL)
-    const perY = Math.floor(container.w / effW)
-    const perZ = Math.floor(container.h / effH)
-    const columnCapacity = perY * perZ
-    const capacity = perX * columnCapacity
-    const toPlace = Math.min(qty, capacity)
-
-    // Round on `qty` (not `toPlace`), capped by `perX`: when length is the binding constraint,
-    // `toPlace` is already an exact multiple of `columnCapacity` (capacity = perX*perY*perZ), so
-    // the cap makes this a no-op there -- rounding only ever changes behaviour when the SKU's own
-    // supply, not the container's remaining length, is what leaves a column incomplete.
-    const roundDown = !sku.priority
-    const columnsForQty = columnCapacity > 0 ? Math.floor(qty / columnCapacity) : 0
-    const columnsUsed = roundDown
-      ? Math.min(columnsForQty, perX)
-      : columnCapacity > 0
-        ? Math.ceil(toPlace / columnCapacity)
-        : 0
-    const actualToPlace = roundDown ? columnsUsed * columnCapacity : toPlace
 
     let placedCount = 0
     columns: for (let xi = 0; xi < perX; xi++) {
@@ -172,7 +165,7 @@ export function pack(
             l,
             w,
             h,
-            orientation: 0,
+            orientation: rotated ? 1 : 0,
           }
           boxes.push(box)
           placementHistory.push(box.id)
@@ -197,6 +190,7 @@ export function pack(
       perZ,
       columnsUsed,
       toPlace: actualToPlace,
+      rotated,
     })
     cursorX += columnsUsed * effL
   }

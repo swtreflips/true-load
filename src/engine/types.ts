@@ -64,6 +64,13 @@ export interface SKU {
    * ordering algorithm (PackOrder) decides on its own.
    */
   priority: boolean
+  /**
+   * Default true: the packer may swap this SKU's length and width (footprint rotation only --
+   * the height axis, and which face is "up", never changes) if that fits more per row. Real
+   * cartons sometimes can't be rotated even though the geometry would allow it -- a printed
+   * face, a spout, a strap, a handling mark -- so this is a per-SKU override, not an assumption.
+   */
+  allowRotation: boolean
 }
 
 /** Position is the box's min corner, never its centre. */
@@ -118,6 +125,8 @@ export interface SlabSummary {
   columnsUsed: number
   /** Boxes actually placed in this slab. */
   toPlace: number
+  /** True if this slab's l/w were swapped from the SKU's as-entered dims (see SKU.allowRotation). */
+  rotated: boolean
 }
 
 export interface ContainerState {

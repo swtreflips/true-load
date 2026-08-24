@@ -23,6 +23,7 @@ export const GRID_SKU: SKU = {
   qty: 8,
   allowedOrientations: [0],
   priority: true,
+  allowRotation: true, // a no-op here since l === w (a cube) -- kept true for realism, not correctness.
 }
 
 /**
@@ -54,6 +55,9 @@ export const SINGLE_SKU: SKU = {
   qty: 1,
   allowedOrientations: [0],
   priority: true,
+  // Rotation locked off: this fixture is about exact orientation-0 placement arithmetic, not
+  // footprint choice (see footprintOrientation.test.ts / ROTATION_BENEFIT_* for that).
+  allowRotation: false,
 }
 
 /**
@@ -82,4 +86,36 @@ export const PARTIAL_COLUMN_SKU: SKU = {
   qty: 10,
   allowedOrientations: [0],
   priority: true,
+  allowRotation: false, // also a cube (l === w), so this is a no-op -- kept explicit for clarity.
+}
+
+/**
+ * A container/SKU pair where rotating the footprint measurably places more units, not just a
+ * differently-shaped remainder. Container width 300mm; the SKU's as-entered width (140mm) leaves
+ * a wasted 20mm strip (floor(300/140)=2 rows), while its as-entered length (100mm) divides the
+ * width evenly if rotated (floor(300/100)=3 rows, zero waste). Hand-verified:
+ *  - as-entered: perY=2, perZ=3 -> 6 boxes/column, perX=floor(1000/100)=10 -> capacity 60.
+ *  - rotated:    perY=3, perZ=3 -> 9 boxes/column, perX=floor(1000/140)=7  -> capacity 63.
+ * qty=61 sits strictly between the two: as-entered can only ever place 60 (1 unplaced no matter
+ * what), rotated places all 61.
+ */
+export const ROTATION_BENEFIT_CONTAINER: ContainerSpec = {
+  id: 'rotation-benefit-test',
+  name: 'Rotation benefit test container',
+  l: mm(1000),
+  w: mm(300),
+  h: mm(300),
+  source: 'synthetic fixture',
+}
+
+export const ROTATION_BENEFIT_SKU: SKU = {
+  id: 'rotation-benefit-box',
+  name: 'Rotation benefit box',
+  l: mm(100),
+  w: mm(140),
+  h: mm(100),
+  qty: 61,
+  allowedOrientations: [0],
+  priority: true,
+  allowRotation: true,
 }

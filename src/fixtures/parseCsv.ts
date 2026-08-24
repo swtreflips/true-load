@@ -11,7 +11,8 @@ function slugify(name: string): string {
 /**
  * Parses the `data.csv` shape (`Item,Quantity,Width,Depth,Height`, all dimensions in centimetres)
  * into engine SKUs. Width -> l, Depth -> w, Height -> h. No weight column, so `weight` is left
- * undefined (unknown), never defaulted to 0. Upright-only (D2 default) — orientation index 0.
+ * undefined (unknown), never defaulted to 0. Upright-only (D2 default): the packer may still swap
+ * l/w per SKU (footprint rotation, `allowRotation` default true) but never tips a box onto its side.
  */
 export function parseSkuCsv(csvText: string): SKU[] {
   const lines = csvText.trim().split(/\r?\n/)
@@ -38,6 +39,7 @@ export function parseSkuCsv(csvText: string): SKU[] {
         qty: Number(cells[qtyIdx]),
         allowedOrientations: [0],
         priority: true,
+        allowRotation: true,
       } satisfies SKU
     })
 }

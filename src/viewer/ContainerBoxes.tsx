@@ -1,18 +1,11 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { boxToThree } from './axisConversion'
+import { hueForSku, SKU_COLOR_SATURATION, SKU_COLOR_LIGHTNESS } from '../theme/skuColor'
 import type { Box } from '../engine/types'
 
-function hueForSku(skuId: string): number {
-  let hash = 0
-  for (let i = 0; i < skuId.length; i++) {
-    hash = (hash * 31 + skuId.charCodeAt(i)) >>> 0
-  }
-  return hash % 360
-}
-
 function colorForSku(skuId: string): THREE.Color {
-  return new THREE.Color().setHSL(hueForSku(skuId) / 360, 0.75, 0.55)
+  return new THREE.Color().setHSL(hueForSku(skuId) / 360, SKU_COLOR_SATURATION, SKU_COLOR_LIGHTNESS)
 }
 
 /**

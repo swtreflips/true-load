@@ -35,6 +35,7 @@ interface ContainerStoreState {
   /** Convenience: allocates every remaining available unit of a SKU. */
   allocateAll: (skuId: string) => void
   setSkuPriority: (skuId: string, priority: boolean) => void
+  setSkuAllowRotation: (skuId: string, allowRotation: boolean) => void
   setToleranceMm: (toleranceMm: number) => void
   setContainer: (container: ContainerSpec) => void
   setSelectedOrder: (order: PackOrder) => void
@@ -99,6 +100,14 @@ export const useContainerStore = create<ContainerStoreState>((set, get) => {
 
     setSkuPriority: (skuId, priority) => {
       const nextPool = get().poolSkus.map((sku) => (sku.id === skuId ? { ...sku, priority } : sku))
+      set({
+        poolSkus: nextPool,
+        ...recompute(nextPool, get().allocatedQty, get().container, get().toleranceMm, get().selectedOrder),
+      })
+    },
+
+    setSkuAllowRotation: (skuId, allowRotation) => {
+      const nextPool = get().poolSkus.map((sku) => (sku.id === skuId ? { ...sku, allowRotation } : sku))
       set({
         poolSkus: nextPool,
         ...recompute(nextPool, get().allocatedQty, get().container, get().toleranceMm, get().selectedOrder),

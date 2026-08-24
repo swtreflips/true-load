@@ -7,6 +7,8 @@ import {
   GRID_SKU,
   PARTIAL_COLUMN_CONTAINER,
   PARTIAL_COLUMN_SKU,
+  ROTATION_BENEFIT_CONTAINER,
+  ROTATION_BENEFIT_SKU,
   SINGLE_BOX_CONTAINER,
   SINGLE_SKU,
 } from '../../fixtures/knownAnswers'
@@ -72,6 +74,31 @@ describe('per-SKU priority: rounding behaviour for a trailing partial column', (
     expect(state.slabs[0].columnsUsed).toBe(2)
     // Length is only reserved for the 2 complete columns, not a wasted 3rd -- 200mm, not 300mm.
     expect(state.boxes.every((b) => b.x < 200)).toBe(true)
+    expect(violations).toHaveLength(0)
+  })
+})
+
+describe('per-SKU footprint rotation', () => {
+  it('rotates end-to-end: places all 61, boxes carry the swapped l/w and orientation 1', () => {
+    const { state, violations } = pack([ROTATION_BENEFIT_SKU], ROTATION_BENEFIT_CONTAINER, 'as-entered', 0)
+
+    expect(state.boxes).toHaveLength(61)
+    expect(state.unplaced).toHaveLength(0)
+    expect(state.slabs[0].rotated).toBe(true)
+    expect(state.boxes.every((b) => b.l === ROTATION_BENEFIT_SKU.w && b.w === ROTATION_BENEFIT_SKU.l)).toBe(true)
+    expect(state.boxes.every((b) => b.orientation === 1)).toBe(true)
+    expect(violations).toHaveLength(0)
+  })
+
+  it('locking allowRotation off keeps the as-entered footprint even though rotating would fit more', () => {
+    const locked = { ...ROTATION_BENEFIT_SKU, allowRotation: false }
+    const { state, violations } = pack([locked], ROTATION_BENEFIT_CONTAINER, 'as-entered', 0)
+
+    expect(state.boxes).toHaveLength(60)
+    expect(state.unplaced).toEqual([{ skuId: locked.id, qty: 1 }])
+    expect(state.slabs[0].rotated).toBe(false)
+    expect(state.boxes.every((b) => b.l === locked.l && b.w === locked.w)).toBe(true)
+    expect(state.boxes.every((b) => b.orientation === 0)).toBe(true)
     expect(violations).toHaveLength(0)
   })
 })

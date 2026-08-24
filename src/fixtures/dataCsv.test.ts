@@ -5,20 +5,24 @@ import { CONTAINER_40HC } from '../engine/containers'
 import { computeUtilisation } from '../engine/metrics/utilisation'
 
 describe('data.csv against a 40HC', () => {
-  it('parses the 5 SKUs with the expected quantities', () => {
+  it('parses the 7 SKUs with the expected quantities', () => {
+    // 5 real SKUs (1550 units) + MOCK01/MOCK02 (390 each, 780 units) -- the mocks are a
+    // deliberately-designed pair demonstrating footprint rotation (see footprintOrientation.ts):
+    // MOCK01's as-entered footprint fits 360/column, but rotated fits 408 -- enough to place all
+    // 390 instead of leaving 30 unplaced. MOCK02 is the same box pre-rotated (Width/Depth
+    // swapped), so the packer correctly leaves it alone; both end up in the same orientation.
     const skus = loadInitialSkus()
-    expect(skus).toHaveLength(5)
-    expect(skus.reduce((sum, s) => sum + s.qty, 0)).toBe(1550)
+    expect(skus).toHaveLength(7)
+    expect(skus.reduce((sum, s) => sum + s.qty, 0)).toBe(2330)
   })
 
   it.each(['as-entered', 'density-desc'] as const)(
     'packs without violations under %s order, and honestly reports what does not fit',
     (order) => {
-      // Combined SKU volume is ~93.2 m3 (275x0.058194 + 400x0.058194 + 300x0.09177 +
-      // 200x0.068172 + 375x0.03404, hand-computed from data.csv), which exceeds a 40HC's
-      // ~76.2-76.35 m3 usable capacity even before packing losses. So this order does NOT
-      // fully fit -- the point of the whole project (PLAN.md D4: load what fits, report the
-      // remainder) -- and this test asserts that honestly rather than assuming a full load.
+      // Combined SKU volume comfortably exceeds a 40HC's ~76.2-76.35 m3 usable capacity even
+      // before packing losses, so this order does NOT fully fit -- the point of the whole
+      // project (PLAN.md D4: load what fits, report the remainder) -- and this test asserts
+      // that honestly rather than assuming a full load.
       const skus = loadInitialSkus()
       const totalQty = skus.reduce((sum, s) => sum + s.qty, 0)
 
