@@ -12,9 +12,14 @@ function volumeM3(sku: SKU): number {
 }
 
 /**
- * The allocation tray: what's actually been committed to the container (sku.qty here is the
- * allocated amount, not the pool total -- see SkuPoolTray for that). Editing "Allocated" moves
- * units back and forth against the pool automatically, clamped to what's available there.
+ * The plan tray: what's been committed to the container, **in the sequence the user built it in**
+ * (sku.qty here is the allocated amount, not the pool total -- see SkuPoolTray for that).
+ *
+ * Row order is a real control, not presentation. `pack()` walks its input front-to-back with one
+ * length cursor, so row 1 gets first claim on the container's length and later rows only see
+ * what's left -- which is why each row carries its position number and arrows to move it. The
+ * 'as-entered' strategy packs exactly this order, putting the planner's own judgment into the
+ * ranked comparison against the five computed heuristics rather than leaving it out of the running.
  *
  * "Allocated" is intent, not outcome -- allocating more than the container can physically hold
  * is valid (the packer reports the remainder as unplaced) but shouldn't look, at a glance, like
@@ -31,6 +36,8 @@ export function SkuTable({
   onQtyChange,
   onPriorityChange,
   onAllowRotationChange,
+  onMove,
+  onRemove,
 }: {
   skus: SKU[]
   maxQty: Record<string, number>
@@ -39,13 +46,28 @@ export function SkuTable({
   onQtyChange: (skuId: string, qty: number) => void
   onPriorityChange: (skuId: string, priority: boolean) => void
   onAllowRotationChange: (skuId: string, allowRotation: boolean) => void
+  onMove: (skuId: string, delta: -1 | 1) => void
+  onRemove: (skuId: string) => void
 }) {
+  if (skus.length === 0) {
+    return (
+      <div className="border border-dashed border-rivet rounded px-3 py-6 text-center text-sm text-steel">
+        Nothing planned yet.
+        <div className="text-xs text-steel/70 mt-1">
+          Add SKUs from the pool above. The order you add them in is the order they're loaded.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm text-manifest">
         <thead>
           <tr className="text-left text-steel border-b border-rivet text-xs uppercase tracking-wide">
-            <th className="py-1 pr-2 font-medium">Item</th>
+            <th className="py-1 pr-2 font-medium" title="Loading sequence — row 1 claims container length first">
+              # Item
+            </th>
             <th
               className="py-1 pr-2 text-center font-medium"
               title="Must ship in full. Deselect to let the packer hold back units that don't complete a full column."
@@ -59,15 +81,20 @@ export function SkuTable({
               Rot.
             </th>
             <th className="py-1 pr-2 text-right font-medium">Alloc.</th>
-            <th className="py-1 pr-2 text-right font-medium" title="How many of the allocated units actually fit in the container">
+            <th
+              className="py-1 pr-2 text-right font-medium whitespace-nowrap"
+              title="How many of the allocated units actually fit in the container"
+            >
               In cont.
             </th>
-            <th className="py-1 pr-2 text-right font-medium">Dims</th>
-            <th className="py-1 text-right font-medium">Vol</th>
+            <th className="py-1 pr-2 text-right font-medium" title="Placed footprint L×W×H in mm. Hover a row for its per-case volume.">
+              Dims
+            </th>
+            <th className="py-1" />
           </tr>
         </thead>
         <tbody>
-          {skus.map((sku) => {
+          {skus.map((sku, index) => {
             const placed = placedQty[sku.id] ?? 0
             const short = sku.qty - placed
             const footprint = placedFootprintBySku[sku.id]
@@ -79,8 +106,31 @@ export function SkuTable({
               <tr key={sku.id} className="border-b border-rivet/60">
                 <td className="py-1.5 pr-2">
                   <span className="flex items-center gap-1.5">
+                    <span className="flex flex-col leading-none shrink-0">
+                      <button
+                        disabled={index === 0}
+                        onClick={() => onMove(sku.id, -1)}
+                        title="Load earlier — claims container length sooner"
+                        aria-label={`Move ${sku.name} earlier in the loading sequence`}
+                        className="text-[8px] text-steel hover:text-cargo-yellow disabled:opacity-20 disabled:hover:text-steel focus:outline-none focus:ring-1 focus:ring-cargo-yellow/60 rounded-sm"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        disabled={index === skus.length - 1}
+                        onClick={() => onMove(sku.id, 1)}
+                        title="Load later — takes whatever length is left"
+                        aria-label={`Move ${sku.name} later in the loading sequence`}
+                        className="text-[8px] text-steel hover:text-cargo-yellow disabled:opacity-20 disabled:hover:text-steel focus:outline-none focus:ring-1 focus:ring-cargo-yellow/60 rounded-sm"
+                      >
+                        ▼
+                      </button>
+                    </span>
+                    <span className="font-mono text-[10px] text-steel tabular-nums shrink-0">{index + 1}</span>
                     <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: skuColorCss(sku.id) }} />
-                    {sku.name}
+                    <span className="truncate" title={sku.name}>
+                      {sku.name}
+                    </span>
                   </span>
                 </td>
                 <td className="py-1.5 pr-2 text-center">
@@ -121,15 +171,27 @@ export function SkuTable({
                   {short > 0 && <span className="text-rust/80"> (-{short})</span>}
                 </td>
                 <td
-                  className="py-1.5 pr-2 text-right font-mono tabular-nums text-xs"
-                  title={rotated ? `Rotated: ${sku.l}×${sku.w} as entered → ${dimsL}×${dimsW} fits more per row` : undefined}
+                  className="py-1.5 pr-2 text-right font-mono tabular-nums text-xs whitespace-nowrap"
+                  title={
+                    (rotated ? `Rotated: ${sku.l}×${sku.w} as entered → ${dimsL}×${dimsW} fits more per row. ` : '') +
+                    `${volumeM3(sku).toFixed(4)} m³ per case`
+                  }
                 >
                   <span className={rotated ? 'text-cargo-yellow' : 'text-steel'}>
                     {dimsL}×{dimsW}×{sku.h}
                     {rotated && ' ⟲'}
                   </span>
                 </td>
-                <td className="py-1.5 text-right font-mono tabular-nums text-xs text-steel">{volumeM3(sku).toFixed(4)}</td>
+                <td className="py-1.5 text-right">
+                  <button
+                    onClick={() => onRemove(sku.id)}
+                    title="Remove from the plan and return its units to the pool"
+                    aria-label={`Remove ${sku.name} from the plan`}
+                    className="text-xs px-1 text-steel hover:text-rust focus:outline-none focus:ring-1 focus:ring-cargo-yellow/60 rounded"
+                  >
+                    ×
+                  </button>
+                </td>
               </tr>
             )
           })}

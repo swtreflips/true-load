@@ -2,20 +2,23 @@ import { skuColorCss } from '../theme/skuColor'
 import type { SKU } from '../engine/types'
 
 /**
- * The data.csv catalog, before anything is committed to the container. Editing "Total" here
- * simulates a different order size; "Available" is what's left after allocation. Nothing here
- * is packed -- see SkuTable (the allocation tray) for what actually reaches the container.
+ * The master list: the whole data.csv catalog, including SKUs that aren't production-ready yet --
+ * a planner should be able to sketch a hypothetical load around something still in production.
+ * Editing "Total" simulates a different order size. Nothing here is packed; "Add" pulls a SKU
+ * into the plan (SkuTable), which is what actually reaches the container.
  */
 export function SkuPoolTray({
   poolSkus,
   allocatedQty,
+  plannedIds,
   onTotalChange,
-  onAllocateAll,
+  onAddToPlan,
 }: {
   poolSkus: SKU[]
   allocatedQty: Record<string, number>
+  plannedIds: Set<string>
   onTotalChange: (skuId: string, qty: number) => void
-  onAllocateAll: (skuId: string) => void
+  onAddToPlan: (skuId: string) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -32,12 +35,16 @@ export function SkuPoolTray({
           {poolSkus.map((sku) => {
             const allocated = allocatedQty[sku.id] ?? 0
             const available = sku.qty - allocated
+            const planned = plannedIds.has(sku.id)
 
             return (
-              <tr key={sku.id} className="border-b border-rivet/60">
+              <tr key={sku.id} className={`border-b border-rivet/60 ${planned ? 'text-steel/60' : ''}`}>
                 <td className="py-1.5 pr-2">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: skuColorCss(sku.id) }} />
+                    <span
+                      className={`w-2 h-2 rounded-sm shrink-0 ${planned ? 'opacity-40' : ''}`}
+                      style={{ backgroundColor: skuColorCss(sku.id) }}
+                    />
                     {sku.name}
                   </span>
                 </td>
@@ -54,14 +61,19 @@ export function SkuPoolTray({
                   {available}
                 </td>
                 <td className="py-1.5 text-right">
-                  <button
-                    disabled={available === 0}
-                    onClick={() => onAllocateAll(sku.id)}
-                    title="Allocate every available unit into the container"
-                    className="text-xs px-1.5 py-0.5 rounded border border-rivet text-steel hover:bg-deck hover:text-manifest disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:outline-none focus:ring-2 focus:ring-cargo-yellow/60"
-                  >
-                    Load all →
-                  </button>
+                  {planned ? (
+                    <span className="text-xs text-steel/70 font-mono" title="Already in the plan below">
+                      in plan
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onAddToPlan(sku.id)}
+                      title="Add to the end of the plan with all units allocated"
+                      className="text-xs px-1.5 py-0.5 rounded border border-rivet text-steel hover:bg-deck hover:text-manifest focus:outline-none focus:ring-2 focus:ring-cargo-yellow/60"
+                    >
+                      Add →
+                    </button>
+                  )}
                 </td>
               </tr>
             )

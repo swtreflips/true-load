@@ -7,19 +7,43 @@ import type { ContainerSpec, SKU } from '../engine/types'
 
 export const TOP_N = 3
 
-/** Combines the pool catalog with per-SKU allocated quantities into the list that actually gets packed. */
-export function toAllocatedSkus(poolSkus: SKU[], allocatedQty: Record<string, number>): SKU[] {
-  return poolSkus.map((sku) => ({ ...sku, qty: allocatedQty[sku.id] ?? 0 }))
+/**
+ * Combines the pool catalog with per-SKU allocated quantities into the list that actually gets
+ * packed, **in the user's plan order** -- `planOrder` is the sequence, not the catalog.
+ *
+ * That ordering is load-bearing, not cosmetic: `pack()` walks its input list front-to-back with a
+ * single length cursor, so position 1 gets first claim on the container's length and everything
+ * after it only sees what's left. The 'as-entered' PackOrder is the one strategy that applies no
+ * sort of its own, which makes it exactly "whatever order this function returns" -- i.e. the plan
+ * the user built by hand, competing on equal footing against the five computed heuristics.
+ */
+export function toAllocatedSkus(
+  poolSkus: SKU[],
+  allocatedQty: Record<string, number>,
+  planOrder: string[],
+): SKU[] {
+  const byId = new Map(poolSkus.map((sku) => [sku.id, sku]))
+  return planOrder.flatMap((skuId) => {
+    const sku = byId.get(skuId)
+    return sku ? [{ ...sku, qty: allocatedQty[skuId] ?? 0 }] : []
+  })
 }
 
 interface ContainerStoreState {
-  /** The full data.csv catalog. `qty` here is TOTAL available, not what's loaded -- see allocatedQty. */
+  /**
+   * The master list: every SKU from data.csv, whether or not it's ready to ship. Browsing catalog
+   * only -- nothing here is packed, and `qty` is TOTAL available rather than what's loaded. A SKU
+   * that isn't production-ready yet still belongs here so it can be planned hypothetically.
+   */
   poolSkus: SKU[]
   /**
-   * skuId -> quantity allocated into the container. Starts empty (every SKU at 0), so the
-   * container starts empty too -- the packer only ever sees what's been explicitly allocated,
-   * not the raw pool.
+   * Which SKUs the user has pulled into the planning tray, in the order they added them. This is
+   * the sequence 'as-entered' packs in, and the user can reorder it directly (see movePlanItem),
+   * so "put this SKU in the container first" is a lever they hold rather than an accident of CSV
+   * row order. Starts empty -- the container starts empty until something is deliberately added.
    */
+  planOrder: string[]
+  /** skuId -> quantity allocated into the container, for SKUs in `planOrder`. */
   allocatedQty: Record<string, number>
   /** Which container type the packer is filling -- 20GP, 40GP, or 40HC (see engine/containers.ts). */
   container: ContainerSpec
@@ -32,8 +56,12 @@ interface ContainerStoreState {
   setPoolQty: (skuId: string, qty: number) => void
   /** Edits how much of a SKU is allocated into the container, clamped to [0, pool total]. */
   setAllocatedQty: (skuId: string, qty: number) => void
-  /** Convenience: allocates every remaining available unit of a SKU. */
-  allocateAll: (skuId: string) => void
+  /** Appends a SKU to the end of the plan with its full pool quantity allocated. No-op if already planned. */
+  addToPlan: (skuId: string) => void
+  /** Drops a SKU out of the plan entirely, returning its units to the pool as available. */
+  removeFromPlan: (skuId: string) => void
+  /** Moves a planned SKU earlier (-1) or later (+1) in the packing sequence. Clamped at the ends. */
+  movePlanItem: (skuId: string, delta: -1 | 1) => void
   setSkuPriority: (skuId: string, priority: boolean) => void
   setSkuAllowRotation: (skuId: string, allowRotation: boolean) => void
   setToleranceMm: (toleranceMm: number) => void
@@ -44,11 +72,12 @@ interface ContainerStoreState {
 function recompute(
   poolSkus: SKU[],
   allocatedQty: Record<string, number>,
+  planOrder: string[],
   container: ContainerSpec,
   toleranceMm: number,
   previouslySelected: PackOrder,
 ) {
-  const rankedConfigs = rankConfigurations(toAllocatedSkus(poolSkus, allocatedQty), container, toleranceMm)
+  const rankedConfigs = rankConfigurations(toAllocatedSkus(poolSkus, allocatedQty, planOrder), container, toleranceMm)
   const topOrders = rankedConfigs.slice(0, TOP_N).map((c) => c.order)
   // Keep the user's selection if it's still in the top N after the change; otherwise the
   // configuration they were looking at dropped out of contention, so snap back to the best.
@@ -59,12 +88,14 @@ function recompute(
 export const useContainerStore = create<ContainerStoreState>((set, get) => {
   const poolSkus = loadInitialSkus()
   const allocatedQty: Record<string, number> = {}
+  const planOrder: string[] = []
   const container = CONTAINER_40HC
   const toleranceMm = DEFAULT_TOLERANCE_MM
-  const initial = recompute(poolSkus, allocatedQty, container, toleranceMm, 'as-entered')
+  const initial = recompute(poolSkus, allocatedQty, planOrder, container, toleranceMm, 'as-entered')
 
   return {
     poolSkus,
+    planOrder,
     allocatedQty,
     container,
     toleranceMm,
@@ -80,7 +111,7 @@ export const useContainerStore = create<ContainerStoreState>((set, get) => {
       set({
         poolSkus: nextPool,
         allocatedQty: nextAllocated,
-        ...recompute(nextPool, nextAllocated, get().container, get().toleranceMm, get().selectedOrder),
+        ...recompute(nextPool, nextAllocated, get().planOrder, get().container, get().toleranceMm, get().selectedOrder),
       })
     },
 
@@ -89,20 +120,54 @@ export const useContainerStore = create<ContainerStoreState>((set, get) => {
       const nextAllocated = { ...get().allocatedQty, [skuId]: Math.min(Math.max(0, Math.round(qty)), total) }
       set({
         allocatedQty: nextAllocated,
-        ...recompute(get().poolSkus, nextAllocated, get().container, get().toleranceMm, get().selectedOrder),
+        ...recompute(get().poolSkus, nextAllocated, get().planOrder, get().container, get().toleranceMm, get().selectedOrder),
       })
     },
 
-    allocateAll: (skuId) => {
-      const total = get().poolSkus.find((s) => s.id === skuId)?.qty ?? 0
-      get().setAllocatedQty(skuId, total)
+    addToPlan: (skuId) => {
+      const { planOrder: current, poolSkus: pool, allocatedQty: allocated } = get()
+      if (current.includes(skuId)) return
+      const total = pool.find((s) => s.id === skuId)?.qty ?? 0
+      // Appended, never inserted: the plan is a running sequence the user builds, so a newly added
+      // SKU queues up behind everything already committed ahead of it.
+      const nextOrder = [...current, skuId]
+      const nextAllocated = { ...allocated, [skuId]: total }
+      set({
+        planOrder: nextOrder,
+        allocatedQty: nextAllocated,
+        ...recompute(pool, nextAllocated, nextOrder, get().container, get().toleranceMm, get().selectedOrder),
+      })
+    },
+
+    removeFromPlan: (skuId) => {
+      const nextOrder = get().planOrder.filter((id) => id !== skuId)
+      const nextAllocated = { ...get().allocatedQty }
+      delete nextAllocated[skuId]
+      set({
+        planOrder: nextOrder,
+        allocatedQty: nextAllocated,
+        ...recompute(get().poolSkus, nextAllocated, nextOrder, get().container, get().toleranceMm, get().selectedOrder),
+      })
+    },
+
+    movePlanItem: (skuId, delta) => {
+      const current = get().planOrder
+      const from = current.indexOf(skuId)
+      const to = from + delta
+      if (from === -1 || to < 0 || to >= current.length) return
+      const nextOrder = [...current]
+      ;[nextOrder[from], nextOrder[to]] = [nextOrder[to], nextOrder[from]]
+      set({
+        planOrder: nextOrder,
+        ...recompute(get().poolSkus, get().allocatedQty, nextOrder, get().container, get().toleranceMm, get().selectedOrder),
+      })
     },
 
     setSkuPriority: (skuId, priority) => {
       const nextPool = get().poolSkus.map((sku) => (sku.id === skuId ? { ...sku, priority } : sku))
       set({
         poolSkus: nextPool,
-        ...recompute(nextPool, get().allocatedQty, get().container, get().toleranceMm, get().selectedOrder),
+        ...recompute(nextPool, get().allocatedQty, get().planOrder, get().container, get().toleranceMm, get().selectedOrder),
       })
     },
 
@@ -110,7 +175,7 @@ export const useContainerStore = create<ContainerStoreState>((set, get) => {
       const nextPool = get().poolSkus.map((sku) => (sku.id === skuId ? { ...sku, allowRotation } : sku))
       set({
         poolSkus: nextPool,
-        ...recompute(nextPool, get().allocatedQty, get().container, get().toleranceMm, get().selectedOrder),
+        ...recompute(nextPool, get().allocatedQty, get().planOrder, get().container, get().toleranceMm, get().selectedOrder),
       })
     },
 
@@ -118,14 +183,14 @@ export const useContainerStore = create<ContainerStoreState>((set, get) => {
       const clamped = Math.max(0, Math.round(toleranceMm))
       set({
         toleranceMm: clamped,
-        ...recompute(get().poolSkus, get().allocatedQty, get().container, clamped, get().selectedOrder),
+        ...recompute(get().poolSkus, get().allocatedQty, get().planOrder, get().container, clamped, get().selectedOrder),
       })
     },
 
     setContainer: (container) => {
       set({
         container,
-        ...recompute(get().poolSkus, get().allocatedQty, container, get().toleranceMm, get().selectedOrder),
+        ...recompute(get().poolSkus, get().allocatedQty, get().planOrder, container, get().toleranceMm, get().selectedOrder),
       })
     },
 

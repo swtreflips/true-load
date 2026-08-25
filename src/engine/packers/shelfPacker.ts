@@ -18,7 +18,12 @@ export const DEFAULT_TOLERANCE_MM = 5
  * single clever derivation. See `rankConfigurations` for running all of them and ranking by
  * outcome.
  *
- *  - 'as-entered': the order the caller's SKU list is in (e.g. CSV row order, or SKU-grid order).
+ *  - 'as-entered': no sort at all -- whatever order the caller handed the SKUs in. In the app
+ *    that's the user's hand-built loading plan (the order they added SKUs, as reordered with the
+ *    tray arrows), which makes this the planner's own judgment entered as a real contender: it
+ *    gets packed and scored against the computed heuristics below on identical terms. It also
+ *    doubles as the control group -- a heuristic that can't beat "the order a human chose" isn't
+ *    earning its complexity.
  *  - 'density-desc': sorted by volume delivered per mm of container length consumed. This is the
  *    greedy fractional-knapsack solution and is optimal IF length could be allocated
  *    continuously -- but this packer rounds each SKU's last partial column of boxes up to a full
@@ -46,7 +51,7 @@ export const ALL_PACK_ORDERS: PackOrder[] = [
 ]
 
 export const PACK_ORDER_LABEL: Record<PackOrder, string> = {
-  'as-entered': 'As entered',
+  'as-entered': 'My plan order',
   'density-desc': 'Max volume/mm first',
   'footprint-desc': 'Largest footprint first',
   'volume-desc': 'Largest volume first',

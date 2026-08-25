@@ -9,6 +9,7 @@ import { PanelHeader } from './ui/PanelHeader'
 export default function App() {
   const {
     poolSkus,
+    planOrder,
     allocatedQty,
     container,
     toleranceMm,
@@ -16,7 +17,9 @@ export default function App() {
     selectedOrder,
     setPoolQty,
     setAllocatedQty,
-    allocateAll,
+    addToPlan,
+    removeFromPlan,
+    movePlanItem,
     setSkuPriority,
     setSkuAllowRotation,
     setToleranceMm,
@@ -24,8 +27,9 @@ export default function App() {
     setSelectedOrder,
   } = useContainerStore()
 
-  const allocatedSkus = toAllocatedSkus(poolSkus, allocatedQty)
+  const allocatedSkus = toAllocatedSkus(poolSkus, allocatedQty, planOrder)
   const maxQty = Object.fromEntries(poolSkus.map((sku) => [sku.id, sku.qty]))
+  const plannedIds = new Set(planOrder)
 
   const selected = rankedConfigs.find((c) => c.order === selectedOrder) ?? rankedConfigs[0]
   const top3 = rankedConfigs.slice(0, TOP_N)
@@ -44,16 +48,28 @@ export default function App() {
 
   return (
     <div className="h-full w-full flex bg-hull font-sans">
-      <aside className="w-96 shrink-0 overflow-y-auto p-4 border-r border-rivet space-y-6">
+      <aside className="w-[30rem] shrink-0 overflow-y-auto p-4 border-r border-rivet space-y-6">
         <ContainerPicker container={container} onChange={setContainer} />
 
         <div>
-          <PanelHeader title="SKU pool" subtitle="From data.csv. Nothing here is loaded until it's allocated below." />
-          <SkuPoolTray poolSkus={poolSkus} allocatedQty={allocatedQty} onTotalChange={setPoolQty} onAllocateAll={allocateAll} />
+          <PanelHeader
+            title="SKU master list"
+            subtitle="Everything in the catalog, ready to ship or not. Add to plan below to include it."
+          />
+          <SkuPoolTray
+            poolSkus={poolSkus}
+            allocatedQty={allocatedQty}
+            plannedIds={plannedIds}
+            onTotalChange={setPoolQty}
+            onAddToPlan={addToPlan}
+          />
         </div>
 
         <div>
-          <PanelHeader title="Allocated to container" subtitle="Only what's allocated here gets packed." />
+          <PanelHeader
+            title="Loading plan"
+            subtitle="Packed top to bottom — row 1 claims container length first. Reorder with ▲▼."
+          />
           <SkuTable
             skus={allocatedSkus}
             maxQty={maxQty}
@@ -62,6 +78,8 @@ export default function App() {
             onQtyChange={setAllocatedQty}
             onPriorityChange={setSkuPriority}
             onAllowRotationChange={setSkuAllowRotation}
+            onMove={movePlanItem}
+            onRemove={removeFromPlan}
           />
         </div>
       </aside>
