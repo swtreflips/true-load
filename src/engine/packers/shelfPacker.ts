@@ -59,6 +59,21 @@ export const PACK_ORDER_LABEL: Record<PackOrder, string> = {
   'qty-asc': 'Lowest quantity first',
 }
 
+/**
+ * One-line, plain-language version of each strategy for the UI. CLAUDE.md §5: a planner has to be
+ * able to see why a layout scored as it did, and a ranked list of six names nobody can decode is
+ * exactly the "better score nobody can justify" that won't get trusted. Kept beside the labels so
+ * the two can't drift apart.
+ */
+export const PACK_ORDER_DESCRIPTION: Record<PackOrder, string> = {
+  'as-entered': 'Loads in the order you arranged the plan — row 1 first, straight down the list.',
+  'density-desc': 'Most volume per mm of container length first. Strong, but can waste length on partial columns.',
+  'footprint-desc': 'Biggest floor footprint first — the classic "big boxes first" instinct.',
+  'volume-desc': 'Biggest box by volume first, regardless of its shape.',
+  'qty-desc': 'The SKU with the most units to ship gets first claim on the length.',
+  'qty-asc': "Fewest units first, so small orders aren't crowded out by the time their turn comes.",
+}
+
 /** Volume (mm^3) this SKU delivers per mm of container length its slab consumes, at effective (tolerance-inflated) size. */
 function densityPerMm(sku: SKU, container: ContainerSpec, toleranceMm: number): number {
   const perY = Math.floor(container.w / (sku.w + toleranceMm))

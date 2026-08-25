@@ -1,4 +1,4 @@
-import { PACK_ORDER_LABEL, type PackOrder } from '../engine/packers/shelfPacker'
+import { PACK_ORDER_DESCRIPTION, PACK_ORDER_LABEL, type PackOrder } from '../engine/packers/shelfPacker'
 import type { RankedConfiguration } from '../engine/packers/rankConfigurations'
 import { skuColorCss } from '../theme/skuColor'
 import type { SKU } from '../engine/types'
@@ -56,6 +56,7 @@ export function MetricsPanel({
               <button
                 key={config.order}
                 onClick={() => onSelectOrder(config.order)}
+                title={PACK_ORDER_DESCRIPTION[config.order]}
                 className={`w-full flex items-center justify-between px-2 py-1.5 rounded border text-left transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-cargo-yellow/60 ${
                   isSelected
                     ? 'bg-cargo-yellow/10 text-manifest border-cargo-yellow font-medium'
