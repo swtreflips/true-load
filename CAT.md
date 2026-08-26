@@ -224,12 +224,20 @@ not which SKU or slab a box "belongs" to — which is exactly what proved §4's 
 
 ## 7. Phased build sequence
 
-A small sub-ladder that sits *beside* `PLAN.md`'s numbered one, not a renumbering of it:
+A small sub-ladder that sits *beside* `PLAN.md`'s numbered one, not a renumbering of it.
+
+One correction worth making explicit: timing (§11 decision 1) isn't its own rung, and shouldn't be
+deferred. Cleanup-only — running once, at the very end, against final `state.unplaced` — cannot see
+the Citybird/Eagle case at all, since Eagle is never unplaced there. Interleaved timing has to be
+present from rung 0 for this feature to reach the case that motivated it. What actually scales
+across the rungs below is *scoring sophistication* (how many candidates get considered, and how a
+winner gets picked among them), not whether the pass runs interleaved — that part is a prerequisite,
+not a later upgrade.
 
 | Rung | What it does | Why this order |
 |---|---|---|
 | **0** | `Space` geometry + a transparent-volume viewer layer. No filling at all. | Touches zero existing files. Verifies the region math visually before any placement risk exists — almost exactly `CLAUDE.md`'s own Phase 2 description. |
-| **1** | Fill only voids with exactly one geometrically-eligible filler SKU. | Sidesteps the scoring question entirely. Proves placement + validation + the loss-attribution fix on the simplest possible case — §4's Citybird/Eagle pocket is exactly this case. |
+| **1** | Interleaved, but only auto-fill a pocket when exactly one geometrically-eligible filler SKU exists among those later in the sequence. | Sidesteps the *scoring* question entirely (no ranking needed when there's only one candidate) while still reaching real cases. Proves placement + validation + the loss-attribution fix — §4's Citybird/Eagle pocket, verified against the real engine, is exactly this rung's known-answer fixture. |
 | **2** | Full design from §6 — multi-candidate scoring, priority tie-break, the global toggle. | The real feature. |
 | **3** | `MetricsPanel`/`LossBreakdownBar` show what void-fill actually recovered, in a sentence. | `CLAUDE.md`'s explainability rule — a better number nobody can explain won't be trusted. |
 | **4** *(conditional)* | Only if rung 2's *measured* recovery on real `data.csv` justifies it: revisit Option A, entering at Extreme Points, not Maximal Spaces. | Don't skip rungs — and don't guess when you could know. |
@@ -274,9 +282,12 @@ Since you're already mid-conversation with the people who'd actually judge this:
 
 ---
 
-## 11. Decisions to make before building this
+## 11. Decisions to make before building this — and the recommended call on each
 
 These are yours to make, not something to derive from the code — §6's design depends on each one.
+Each carries a recommendation below, arrived at by actually working the numbers rather than
+guessing, same as everything else in this document — but they're still open calls, not settled
+facts, and worth revisiting once real use says otherwise.
 
 1. **Timing: interleaved, or cleanup-only?** Does void-fill run *between* each SKU's turn, so a
    later SKU's not-yet-placed quantity can be drawn forward into an earlier SKU's gap (with that
@@ -286,17 +297,31 @@ These are yours to make, not something to derive from the code — §6's design 
    it would not reach your own Citybird → Eagle example — Eagle is never unplaced, it's just not
    placed *yet*. Interleaved reaches it, at the cost of a real, if small, change inside `pack()`'s
    core loop rather than a pure bolt-on after it.
+   **Recommendation: interleaved, from the first line of code.** Cleanup-only isn't meaningfully
+   cheaper to build — discovery, scoring, and validation are the same either way, and the only extra
+   cost interleaving adds is a qty-reduction step before a SKU's own slab, which isn't the hard part.
+   Building the weaker version first wouldn't buy anything, since it can't see the case that
+   motivated this whole document. See §7's revised ladder — timing is a rung-0 prerequisite, not a
+   later upgrade.
 
 2. **Minimum fill-quality threshold.** A pocket that fits one small box while wasting most of its
    own volume is still, technically, a fit. Do you want any geometric fit accepted regardless of how
    much of the pocket goes unused, or a minimum utilisation bar below which a pocket is left alone —
    and if the latter, a fixed number, or something you'd tune per load?
+   **Recommendation: no threshold for v1.** Once a filler's own later slab is correspondingly
+   reduced (already required for correctness, per decision 1), an accepted fit is a strict
+   improvement no matter how small — dead volume becomes loaded volume, and nothing gets worse.
+   Add a threshold later only if real use shows a tiny filler isn't worth the extra handling
+   complexity on the loading sheet — which is a question for decision 5 and §10, not this one.
 
 3. **Which SKUs are allowed to be fillers.** The default in §6 is "any SKU that geometrically fits"
    — same posture as `priority`/`allowRotation` today: on by default, opt out per SKU. Real reasons
    you might want an exception: a fragile SKU, one with a printed or branded face that shouldn't end
    up wedged sideways into a scrap pocket, or a high-value SKU you'd rather not split across two
    physical locations on the loading sheet.
+   **Recommendation: all SKUs eligible by default, opt out per SKU.** Mirrors `priority`/
+   `allowRotation` exactly, so it costs nothing new to learn — the same row, the same kind of
+   checkbox, the same "on unless you say otherwise" posture the user already trusts.
 
 4. **How many of the four leftover shapes to target first.** Your own example landed on the
    column-rounding pocket — which, as §4 shows, often *merges* with that same SKU's ceiling gap into
@@ -305,8 +330,20 @@ These are yours to make, not something to derive from the code — §6's design 
    real opportunity is in your current catalog), or all four shapes — including boundary and
    trailing-length, which didn't apply to Citybird specifically but will to other SKUs — from the
    start?
+   **Recommendation: column-rounding merged with ceiling, plus true end-of-container trailing
+   length — skip boundary strips for now.** This isn't just what your example happened to hit, it's
+   structurally the common case: a column-rounding/ceiling merge shows up for essentially any SKU
+   whose quantity doesn't exactly fill its last column, which is most of them. Boundary strips are
+   only real when a SKU's width doesn't evenly divide the container's width, and are frequently too
+   thin to matter — Citybird's is 27mm. Trailing length is only ever a genuine pocket at the very
+   end of the whole sequence, since slabs already sit flush against each other today. Boundary strips
+   are the one shape that's cheap to add later without disturbing anything already built.
 
 5. **Loading-sheet visibility.** If two different SKUs end up sharing one physical pocket, does a
    crew need that called out explicitly on the plan so nobody misses it, or is the 3D view and box
    list enough on their own? Same question as §10 — worth deciding for yourself before you ask them,
    so you know what you're actually asking.
+   **Recommendation: defer.** Ship with the 3D view and box list as the only visibility, same as
+   every other feature today — rotation and priority didn't get a dedicated callout either, just a
+   marker in the row that was already there. Add an explicit "mixed pocket" indicator only if the
+   dock team says, once they've actually seen it, that it isn't enough.
